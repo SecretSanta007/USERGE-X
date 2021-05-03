@@ -12,15 +12,15 @@ import io
 import os
 import random
 
-import emoji
 from bs4 import BeautifulSoup as bs
 from PIL import Image
+from pyrogram import emoji
 from pyrogram.errors import StickersetInvalid, YouBlockedUser
 from pyrogram.raw.functions.messages import GetStickerSet
 from pyrogram.raw.types import InputStickerSetShortName
 
 from userge import Config, Message, userge
-from userge.utils.helper import AioHttp
+from userge.utils import get_response
 
 
 @userge.on_cmd(
@@ -43,7 +43,7 @@ from userge.utils.helper import AioHttp
     allow_via_bot=False,
 )
 async def kang_(message: Message):
-    """ kang a sticker """
+    """kang a sticker"""
     user = await userge.get_me()
     replied = message.reply_to_message
     photo = None
@@ -84,14 +84,16 @@ async def kang_(message: Message):
             else:
                 emoji_ = args[0]
 
-        if emoji_ and emoji_ not in emoji.UNICODE_EMOJI:
+        if emoji_ and emoji_ not in (
+            getattr(emoji, _) for _ in dir(emoji) if not _.startswith("_")
+        ):
             emoji_ = None
         if not emoji_:
             emoji_ = "🤔"
 
         u_name = user.username
         u_name = "@" + u_name if u_name else user.first_name or user.id
-        packname = f"a{user.id}_by_userge_{pack}"
+        packname = f"a{user.id}_by_x_{pack}"
         custom_packnick = Config.CUSTOM_PACK_NAME or f"{u_name}'s kang pack"
         packnick = f"{custom_packnick} Vol.{pack}"
         cmd = "/newpack"
@@ -226,7 +228,7 @@ async def kang_(message: Message):
     },
 )
 async def sticker_pack_info_(message: Message):
-    """ get sticker pack info """
+    """get sticker pack info"""
     replied = message.reply_to_message
     if not replied:
         await message.edit("`I can't fetch info from nothing, can I ?!`")
@@ -258,7 +260,7 @@ async def sticker_pack_info_(message: Message):
 
 
 def resize_photo(photo: str) -> io.BytesIO:
-    """ Resize the given photo to 512x512 """
+    """Resize the given photo to 512x512"""
     image = Image.open(photo)
     maxsize = 512
     scale = maxsize / max(image.width, image.height)
@@ -295,7 +297,7 @@ KANGING_STR = (
     },
 )
 async def sticker_search(message: Message):
-    """search sticker packs"""
+    # search sticker packs
     reply = message.reply_to_message
     query_ = None
     if message.input_str:
@@ -311,8 +313,16 @@ async def sticker_search(message: Message):
     await message.edit(f'🔎 Searching for sticker packs for "`{query_}`"...')
     titlex = f'<b>Sticker Packs For:</b> "<u>{query_}</u>"\n'
     sticker_pack = ""
-    text = await AioHttp.get_text(f"https://combot.org/telegram/stickers?q={query_}")
-    soup = bs(text[1], "lxml")
+    try:
+        text = await get_response.text(
+            f"https://combot.org/telegram/stickers?q={query_}"
+        )
+    except ValueError:
+        return await message.err(
+            "Response was not 200!, Api is having some issues\n Please try again later.",
+            del_in=5,
+        )
+    soup = bs(text, "lxml")
     results = soup.find_all("div", {"class": "sticker-pack__header"})
     for pack in results:
         if pack.button:

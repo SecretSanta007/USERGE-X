@@ -70,7 +70,7 @@ async def warn_func(message: Message):
 
     if await admin_check(message.chat, warned_user.id):
         return await message.err(user_is_admin, del_in=3)
-    elif warned_user.id in Config.OWNER_ID or warned_user.id in Config.SUDO_USERS:
+    if warned_user.id in Config.OWNER_ID or warned_user.id in Config.SUDO_USERS:
         return await message.err(owner_or_sudo, del_in=3)
 
     found = await WARN_DATA.find_one({"chat_id": message.chat.id})
@@ -294,8 +294,7 @@ async def chat_rules(message: Message):
         out = out.format("Rules", "Changed", message.chat.title, message.chat.id)
     else:
         out = out.format("Rules", "Updated", message.chat.title, message.chat.id)
-    await message.edit(out)
-    await CHANNEL.log(out)
+    await message.edit(out, log=__name__)
 
 
 async def admin_check(chatx: Chat, user_id: int) -> bool:
@@ -328,7 +327,7 @@ async def ban_function(message: Message, warned_user: User, warn_mode: str):
     allow_channels=False,
     check_restrict_perm=True,
 )
-async def totalwarns(message: Message):
+async def resetwarns(message: Message):
     """reset all warns of a user"""
     warn_user_id = (message.extract_user_and_text)[0]
     if not warn_user_id:
@@ -411,7 +410,7 @@ if userge.has_bot:
             )
 
     @userge.bot.on_callback_query(filters.regex(pattern=r"^warnmode_type_(.*)$"))
-    async def remove_warn_(_, c_q: CallbackQuery):
+    async def warn_mode_type(_, c_q: CallbackQuery):
         u_id = c_q.from_user.id
         if u_id not in Config.OWNER_ID:
             return await c_q.answer(permission_denied, show_alert=True)
@@ -426,20 +425,17 @@ if userge.has_bot:
     @userge.bot.on_message(
         filters.private & (filters.regex(pattern=r"^/start chatrules_(.*)_(.*)"))
     )
-    async def spoiler_get(_, message: Message):
-        u_user = message.from_user
-
-        chat_ = message.matches[0].group(1)
+    async def xchat_rules_(_, message: Message):
+        u_user = message.from_user.id
         log_id_ = message.matches[0].group(2)
-        await CHANNEL.log(f"{chat_}\n\n{log_id_}")
-
         try:
             await CHANNEL.forward_stored(
                 client=userge.bot,
-                message_id=log_id_,
-                user_id=u_user.id,
-                chat_id=message.chat.id,
+                message_id=int(log_id_),
+                user_id=u_user,
+                chat_id=u_user,
                 reply_to_message_id=message.message_id,
+                allow_random=False,
             )
         except UserIsBlocked:
             pass

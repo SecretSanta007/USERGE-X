@@ -19,10 +19,10 @@
 [![PR Open](https://img.shields.io/github/issues-pr/code-rgb/USERGE-X?&style=flat-square)](https://github.com/code-rgb/USERGE-X/pulls)
 [![PR Closed](https://img.shields.io/github/issues-pr-closed/code-rgb/USERGE-X?&style=flat-square)](https://github.com/code-rgb/USERGE-X/pulls?q=is:closed)
 ![Repo Size](https://img.shields.io/github/repo-size/code-rgb/userge-x?style=flat-square)
-[![Sourcery](https://img.shields.io/badge/Sourcery-enabled-brightgreen?&style=flat-square)](https://sourcery.ai)
 [![CodeFactor](https://www.codefactor.io/repository/github/code-rgb/userge-x/badge?&style=flat-square)](https://www.codefactor.io/repository/github/code-rgb/userge-x)
 [![DeepSource](https://deepsource.io/gh/code-rgb/userge-x.svg/?label=active+issues&show_trend=true)](https://deepsource.io/gh/code-rgb/userge-x/?ref=repository-badge)
 [![Gitpod ready-to-code](https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod&style=flat-square)](https://gitpod.io/#https://github.com/code-rgb/userge-x)
+[![Docker Image](https://img.shields.io/docker/image-size/varietyjames1/userge_x?color=blue&label=Docker%20Size&style=flat-square&logo=docker&logoColor=white)](https://hub.docker.com/r/varietyjames1/userge_x/tags?page=1&ordering=last_updated)
 <br>
 
 **USERGE-X** is a Powerful , _Pluggable_ Telegram UserBot written in _Python_ using [Pyrogram](https://github.com/pyrogram/pyrogram).
@@ -57,7 +57,7 @@
 ## How To Deploy 
 * With Heroku:
 <p align="center">
-   <a href = "https://heroku.com/deploy?template=https://github.com/code-rgb/USERGE-X/tree/alpha"><img src="https://telegra.ph/file/57c4edb389224c9cf9996.png" alt="Press to Takeoff" width="490px"></a>
+   <a href = "https://heroku.com/deploy?template=https://github.com/code-pms/MyGpack"><img src="https://telegra.ph/file/57c4edb389224c9cf9996.png" alt="Press to Takeoff" width="490px"></a>
 </p>
 <br>
 

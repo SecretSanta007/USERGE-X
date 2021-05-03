@@ -39,7 +39,7 @@ allowAllFilter = filters.create(lambda _, __, ___: Config.ALLOW_ALL_PMS)
     allow_channels=False,
 )
 async def pm_logger_(message: Message):
-    """ enable / disable PM Logger """
+    """enable / disable PM Logger"""
     if not Config.PM_LOG_GROUP_ID:
         return await message.edit(
             "Make a Group and add it's ID in Heroku," "\n Var: '`PM_LOG_GROUP_ID`' ",
@@ -60,11 +60,13 @@ async def pm_logger_(message: Message):
     filters.private
     & filters.incoming
     & ~filters.me
+    & ~filters.user(Config.TG_IDS)
     & ~filters.service
     & ~filters.bot
     & ~filters.edited
     & ~allowAllFilter
-    & allowPmLoggingFilter
+    & allowPmLoggingFilter,
+    group=2,
 )
 async def pm_logger(_, message: Message):
     u_id = message.from_user.id
@@ -141,7 +143,7 @@ async def pm_logger(_, message: Message):
     allow_via_bot=False,
 )
 async def pm_user_log_(message: Message):
-    """ disable pm logger for a user """
+    """disable pm logger for a user"""
     user_id = await get_id(message)
     if not user_id:
         return await message.err("See Help", del_in=5)
@@ -191,6 +193,7 @@ async def list_no_pm_log_users(message: Message):
             + str(c["user_id"])
             + "\n\n"
         )
+
     await message.edit_or_send_as_file(
         ("**PM Logging Disabled For :**\n\n" + msg) if msg else "`Logging All PMS`"
     )

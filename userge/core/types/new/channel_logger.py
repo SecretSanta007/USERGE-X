@@ -13,11 +13,11 @@ __all__ = ['ChannelLogger']
 import asyncio
 from typing import Optional, Union
 
+from pyrogram.errors import ChatWriteForbidden
 from pyrogram.types import Message as RawMessage
 from pyrogram.errors.exceptions import MessageTooLong
-
 from userge import logging, Config
-from userge.utils import SafeDict, get_file_id_and_ref, parse_buttons
+from userge.utils import SafeDict, get_file_id, parse_buttons, rand_array
 from ..bound import message as _message  # pylint: disable=unused-import
 from ... import client as _client  # pylint: disable=unused-import
 
@@ -31,7 +31,7 @@ def _gen_string(name: str) -> str:
 
 class ChannelLogger:
     """ Channel logger for Userge """
-    def __init__(self, client: Union['_client.Userge', '_client._UsergeBot'], name: str) -> None:
+    def __init__(self, client: Union['_client.Userge', '_client.UsergeBot'], name: str) -> None:
         self._id = Config.LOG_CHANNEL_ID
         self._client = client
         self._string = _gen_string(name)
@@ -80,8 +80,7 @@ class ChannelLogger:
     async def fwd_msg(self,
                       message: Union['_message.Message', 'RawMessage'],
                       name: str = '',
-                      as_copy: bool = True,
-                      remove_caption: bool = False) -> None:
+                      as_copy: bool = True) -> None:
         """\nforward message to log channel.
 
         Parameters:
@@ -97,12 +96,6 @@ class ChannelLogger:
                 that it appears as originally sent by you).
                 Defaults to True.
 
-            remove_caption (`bool`, *optional*):
-                If set to True and *as_copy* is enabled as well,
-                media captions are not preserved when copying the
-                message. Has no effect if *as_copy* is not enabled.
-                Defaults to False.
-
         Returns:
             None
         """
@@ -112,12 +105,10 @@ class ChannelLogger:
             if message.media:
                 asyncio.get_event_loop().create_task(self.log("**Forwarding Message...**", name))
                 try:
-                    # pylint: disable=protected-access
-                    await message._client.forward_messages(chat_id=self._id,
-                                                           from_chat_id=message.chat.id,
-                                                           message_ids=message.message_id,
-                                                           as_copy=as_copy,
-                                                           remove_caption=remove_caption)
+                    if as_copy:
+                        await message.copy(chat_id=self._id)
+                    else:
+                        await message.forward(chat_id=self._id)
                 except ValueError:
                     pass
             else:
@@ -140,33 +131,34 @@ class ChannelLogger:
             message_id on success or None
         """
         caption = caption or ''
-        file_id = file_ref = None
+        file_id = None
         if message and message.caption:
-            caption = caption + message.caption.html
+            caption = (caption + message.caption.html) if caption != message.caption.html else caption
         if message:
-            file_id, file_ref = get_file_id_and_ref(message)
-        if message and message.media and file_id and file_ref:
+            file_id = get_file_id(message)
+        if message and message.media and file_id:
             if caption:
                 caption = self._string.format(caption.strip())
             msg = await message.client.send_cached_media(chat_id=self._id,
                                                          file_id=file_id,
-                                                         file_ref=file_ref,
                                                          caption=caption)
-            return msg.message_id
+            message_id = msg.message_id
         else:
-            return await self.log(caption)
+            message_id = await self.log(caption)
+        return message_id
 
     async def forward_stored(self,
-                             client: Union['_client.Userge', '_client._UsergeBot'],
+                             client: Union['_client.Userge', '_client.UsergeBot'],
                              message_id: int,
                              chat_id: int,
                              user_id: int,
                              reply_to_message_id: int,
-                             del_in: int = 0) -> None:
+                             del_in: int = 0,
+                             allow_random:bool=True) -> None:
         """\nforward stored message from log channel.
 
         Parameters:
-            client (`Userge` | `usergeBot`):
+            client (`Userge` | `UsergeBot`):
                 Pass Userge or UsergeBot.
 
             message_id (`int`):
@@ -192,7 +184,6 @@ class ChannelLogger:
         message = await client.get_messages(chat_id=self._id,
                                             message_ids=message_id)
         caption = ''
-        file_id = file_ref = None
         if message.caption:
             caption = message.caption.html.split('\n\n', maxsplit=1)[-1]
         elif message.text:
@@ -200,28 +191,32 @@ class ChannelLogger:
         if caption:
             u_dict = await client.get_user_dict(user_id)
             chat = await client.get_chat(chat_id)
-            u_dict.update(
-                {'chat': chat.title or "this group", 'count': chat.members_count}
-            )
-
+            u_dict.update({
+                'chat': chat.title if chat.title else "this group",
+                'count': chat.members_count})
             caption = caption.format_map(SafeDict(**u_dict))
-        file_id, file_ref = get_file_id_and_ref(message)
+        file_id = get_file_id(message)
         caption, buttons = parse_buttons(caption)
-        if message.media and file_id and file_ref:
-            msg = await client.send_cached_media(
-                chat_id=chat_id,
-                file_id=file_id,
-                file_ref=file_ref,
-                caption=caption,
-                reply_to_message_id=reply_to_message_id,
-                reply_markup=buttons if client.is_bot and buttons else None)
-        else:
-            msg = await client.send_message(
-                chat_id=chat_id,
-                text=caption,
-                reply_to_message_id=reply_to_message_id,
-                disable_web_page_preview=True,
-                reply_markup=buttons if client.is_bot and buttons else None)
-        if del_in and msg:
-            await asyncio.sleep(del_in)
-            await msg.delete()
+        split_char = r"%%%"
+        if allow_random and split_char in caption:
+            caption = rand_array(caption.split(split_char))
+        try:
+            if message.media and file_id:
+                msg = await client.send_cached_media(
+                    chat_id=chat_id,
+                    file_id=file_id,
+                    caption=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    reply_markup=buttons if client.is_bot and buttons else None)
+            else:
+                msg = await client.send_message(
+                    chat_id=chat_id,
+                    text=caption,
+                    reply_to_message_id=reply_to_message_id,
+                    disable_web_page_preview=True,
+                    reply_markup=buttons if client.is_bot and buttons else None)
+            if del_in and msg:
+                await asyncio.sleep(del_in)
+                await msg.delete()
+        except ChatWriteForbidden:
+            pass

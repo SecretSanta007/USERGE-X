@@ -1,13 +1,5 @@
 """ setup AFK mode """
 
-# Copyright (C) 2020 by UsergeTeam@Github, < https://github.com/UsergeTeam >.
-#
-# This file is part of < https://github.com/UsergeTeam/Userge > project,
-# and is released under the "GNU v3.0 License Agreement".
-# Please see < https://github.com/uaudith/Userge/blob/master/LICENSE >
-#
-# All rights reserved.
-
 import asyncio
 import time
 from random import choice, randint
@@ -48,7 +40,7 @@ async def _init() -> None:
     allow_channels=False,
 )
 async def active_afk(message: Message) -> None:
-    """ turn on or off afk mode """
+    """turn on or off afk mode"""
     global REASON, IS_AFK, TIME  # pylint: disable=global-statement
     IS_AFK = True
     TIME = time.time()
@@ -69,6 +61,7 @@ async def active_afk(message: Message) -> None:
     IS_AFK_FILTER
     & ~filters.me
     & ~filters.bot
+    & ~filters.user(Config.TG_IDS)
     & ~filters.edited
     & (
         filters.mentioned
@@ -84,7 +77,9 @@ async def active_afk(message: Message) -> None:
     allow_via_bot=False,
 )
 async def handle_afk_incomming(message: Message) -> None:
-    """ handle incomming messages when you afk """
+    """handle incomming messages when you afk"""
+    if not message.from_user:
+        return
     user_id = message.from_user.id
     chat = message.chat
     user_dict = await message.client.get_user_dict(user_id)
@@ -150,7 +145,7 @@ async def handle_afk_incomming(message: Message) -> None:
 
 @userge.on_filters(IS_AFK_FILTER & filters.outgoing, group=-1, allow_via_bot=False)
 async def handle_afk_outgoing(message: Message) -> None:
-    """ handle outgoing messages when you afk """
+    """handle outgoing messages when you afk"""
     global IS_AFK  # pylint: disable=global-statement
     IS_AFK = False
     afk_time = time_formatter(round(time.time() - TIME))

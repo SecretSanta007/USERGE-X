@@ -91,12 +91,10 @@ ipython_config.py
 #   install all needed dependencies.
 #Pipfile.lock
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
 # Celery stuff
-celerybeat-schedule
 celerybeat.pid
+# celery beat schedule file
+celerybeat-schedule
 
 # SageMath parsed files
 *.sage.py
@@ -129,27 +127,29 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# config files
+userge/xcache/
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat.pid
+
+# USERGE-X
 .apt/
 .heroku/
 .profile.d/
 vendor/
-config.ini
 config.env
 .vscode/
 .idea/
 *.session
-log.txt
 unknown_errors.txt
 logs/
-bin/
+userge/plugins/dev/
 resources/base_profile_pic.jpg
 resources/mdfy_profile_pic.jpg
-pictest.py
-resources/MutantAcademyBB.ttf
-userge/plugins/dev/
 resources/ProductSans-BoldItalic.ttf
 resources/ProductSans-Light.ttf
 resources/Roboto-Regular.ttf
 resources/font.ttf
-resources/Roboto-Medium
+resources/Roboto-Medium.tff

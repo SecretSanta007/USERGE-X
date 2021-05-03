@@ -11,11 +11,14 @@
 import asyncio
 from typing import Dict, Tuple
 
+from pyrogram.errors import BadRequest, Forbidden
+
 from userge import Config, Message, get_collection, userge
+from userge.utils import SafeDict, get_file_id, parse_buttons
 
 NOTES_COLLECTION = get_collection("notes")
 CHANNEL = userge.getCLogger(__name__)
-
+SAVED_SETTINGS = get_collection("CONFIGS")
 NOTES_DATA: Dict[int, Dict[str, Tuple[int, bool]]] = {}
 
 
@@ -49,6 +52,9 @@ async def _init() -> None:
         if "mid" not in nt:
             continue
         _note_updater(nt["chat_id"], nt["name"], nt["mid"], nt["global"])
+    s_o = await SAVED_SETTINGS.find_one({"_id": "INLINE_NOTES"})
+    if s_o:
+        Config.INLINE_NOTES = s_o["data"]
 
 
 @userge.on_cmd(
@@ -61,7 +67,7 @@ async def _init() -> None:
     allow_bots=False,
 )
 async def view_notes(message: Message) -> None:
-    """ list notes in current chat """
+    """list notes in current chat"""
     out = ""
     if "-all" in message.flags:
         await message.edit("`getting notes ...`")
@@ -95,7 +101,7 @@ async def view_notes(message: Message) -> None:
     allow_bots=False,
 )
 async def remove_note(message: Message) -> None:
-    """ delete note in current chat """
+    """delete note in current chat"""
     if "-every" in message.flags:
         NOTES_DATA.clear()
         await asyncio.gather(
@@ -137,7 +143,7 @@ async def remove_note(message: Message) -> None:
     allow_bots=False,
 )
 async def mv_to_local_note(message: Message) -> None:
-    """ global to local note """
+    """global to local note"""
     notename = message.input_str
     if not notename:
         out = "`Wrong syntax`\nNo arguements"
@@ -166,7 +172,7 @@ async def mv_to_local_note(message: Message) -> None:
     allow_bots=False,
 )
 async def mv_to_global_note(message: Message) -> None:
-    """ local to global note """
+    """local to global note"""
     notename = message.input_str
     if not notename:
         out = "`Wrong syntax`\nNo arguements"
@@ -194,7 +200,7 @@ async def mv_to_global_note(message: Message) -> None:
     check_client=True,
 )
 async def get_note(message: Message) -> None:
-    """ get any saved note """
+    """get any saved note"""
     if not message.from_user:
         return
     if message.chat.id not in NOTES_DATA:
@@ -219,6 +225,23 @@ async def get_note(message: Message) -> None:
                 user_id = replied.from_user.id
         else:
             reply_to_message_id = message.message_id
+        if not message.client.is_bot and userge.has_bot and Config.INLINE_NOTES:
+            bot = await userge.bot.get_me()
+            try:
+                x = await userge.get_inline_bot_results(
+                    bot.username, f"inotes {mid}_{message.chat.id}_{user_id}"
+                )
+                await userge.send_inline_bot_result(
+                    chat_id=message.chat.id,
+                    query_id=x.query_id,
+                    result_id=x.results[0].id,
+                    reply_to_message_id=reply_to_message_id,
+                )
+            except (Forbidden, BadRequest) as ex:
+                await message.err(str(ex), del_in=5)
+            else:
+                return
+
         await CHANNEL.forward_stored(
             client=message.client,
             message_id=mid,
@@ -240,6 +263,7 @@ async def get_note(message: Message) -> None:
             "{chat}": "chat name",
             "{count}": "chat members count",
             "{mention}": "mention user",
+            r"%%%": 'This separator can be used to add "random" notes',
         },
         "usage": "{tr}addnote [note name] [content | reply to msg]",
         "buttons": "<code>[name][buttonurl:link]</code> - <b>add a url button</b>\n"
@@ -250,7 +274,7 @@ async def get_note(message: Message) -> None:
     allow_bots=False,
 )
 async def add_note(message: Message) -> None:
-    """ add note to curent chat """
+    """add note to curent chat"""
     notename = message.matches[0].group(1)
     content = message.matches[0].group(2)
     replied = message.reply_to_message
@@ -274,3 +298,56 @@ async def add_note(message: Message) -> None:
     else:
         out = out.format("Updated", notename)
     await message.edit(text=out, del_in=3, log=__name__)
+
+
+async def get_inote(note_id: int, chat_id: int, user_id: int):
+    message = await userge.bot.get_messages(Config.LOG_CHANNEL_ID, note_id)
+    caption = ""
+    if message.caption:
+        caption = message.caption.html.split("\n\n", maxsplit=1)[-1]
+    elif message.text:
+        caption = message.text.html.split("\n\n", maxsplit=1)[-1]
+    if caption:
+        caption = no_mention(caption)
+        u_dict = await userge.get_user_dict(user_id)
+        u_dict["mention"] = no_mention(u_dict["mention"])
+        chat = await userge.get_chat(chat_id)
+        u_dict.update(
+            {
+                "chat": chat.title if chat.title else "this group",
+                "count": chat.members_count,
+            }
+        )
+        caption = caption.format_map(SafeDict(**u_dict))
+    file_id = get_file_id(message)
+    caption, buttons = parse_buttons(caption)
+    if message.media and file_id:
+        if message.photo:
+            type_ = "photo"
+        else:
+            type_ = "media"
+    else:
+        type_ = "text"
+    return {"type": type_, "file_id": file_id, "caption": caption, "buttons": buttons}
+
+
+def no_mention(text: str):
+    return text.replace("tg://user?id=", "tg://openmessage?user_id=")
+
+
+@userge.on_cmd(
+    "inline_note",
+    about={"header": "enable / disable inline notes"},
+    allow_channels=False,
+)
+async def inline_note_(message: Message):
+    """enable / disable inline notes"""
+    if Config.INLINE_NOTES:
+        Config.INLINE_NOTES = False
+        await message.edit("`inline notes disabled !`", del_in=3)
+    else:
+        Config.INLINE_NOTES = True
+        await message.edit("`inline notes enabled !`", del_in=3)
+    await SAVED_SETTINGS.update_one(
+        {"_id": "INLINE_NOTES"}, {"$set": {"data": Config.INLINE_NOTES}}, upsert=True
+    )

@@ -3,18 +3,17 @@
 
 
 import asyncio
-import json
 import os
 
+import ujson
 from pyrogram import filters
 from pyrogram.errors import BadRequest, FloodWait
 from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from userge import Config, Message, userge
 
-if not os.path.exists("userge/xcache"):
-    os.mkdir("userge/xcache")
 PATH = "userge/xcache/emoji_data.txt"
+CHANNEL = userge.getCLogger(__name__)
 
 
 if userge.has_bot:
@@ -27,7 +26,8 @@ if userge.has_bot:
         opinion_id = c_q.matches[0].group(2)
         ids = c_q.from_user.id
         counter = c_q.matches[0].group(1)
-        data = json.load(open(PATH))
+        with open(PATH) as f:
+            data = ujson.load(f)
         view_data = data[str(opinion_id)]
         agree_data = "👍"
         disagree_data = "👎"
@@ -69,7 +69,8 @@ if userge.has_bot:
                     disagree = view_data[1]["disagree"] + 1
                 view_data[1] = {"agree": agree, "disagree": disagree}
             data[str(opinion_id)] = view_data
-            json.dump(data, open(PATH, "w"))
+            with open(PATH, "w") as outfile:
+                ujson.dump(data, outfile)
         else:
             if len(view_data) == 1:
                 # Answering Query First then moving forward
@@ -80,11 +81,10 @@ if userge.has_bot:
                 if counter == "n":
                     view_data = [{ids: "n"}, {"agree": 0, "disagree": 1}]
                 data[str(opinion_id)] = view_data
-                json.dump(data, open(PATH, "w"))
-
+                with open(PATH, "w") as outfile:
+                    ujson.dump(data, outfile)
         agree_data += f"  {view_data[1]['agree']}"
         disagree_data += f"  {view_data[1]['disagree']}"
-
         opinion_data = [
             [
                 InlineKeyboardButton(agree_data, callback_data=f"op_y_{opinion_id}"),
@@ -93,8 +93,8 @@ if userge.has_bot:
             [InlineKeyboardButton("📊 Stats", callback_data=f"opresult_{opinion_id}")],
         ]
         try:
-            await userge.bot.edit_inline_reply_markup(
-                c_q.inline_message_id, reply_markup=InlineKeyboardMarkup(opinion_data)
+            await c_q.edit_message_reply_markup(
+                reply_markup=InlineKeyboardMarkup(opinion_data)
             )
         except FloodWait as e:
             await asyncio.sleep(e.x)
@@ -106,7 +106,7 @@ if userge.has_bot:
         u_id = c_q.from_user.id
         opinion_id = c_q.matches[0].group(1)
         if u_id in Config.OWNER_ID:
-            data = json.load(open(PATH))
+            data = ujson.load(open(PATH))
             view_data = data[str(opinion_id)]
             total = len(view_data[0])
             ag = view_data[1]["agree"]
@@ -117,8 +117,7 @@ if userge.has_bot:
             msg += f"• 👤 `{total} People voted`\n\n"
             msg += f"• 👍 `{agreed}% People Agreed`\n\n"
             msg += f"• 👎 `{disagreed}% People Disagreed`\n\n"
-
-            await userge.bot.edit_inline_text(c_q.inline_message_id, msg)
+            await c_q.edit_message_text(msg)
         else:
             a = await userge.get_me()
             if a.username:
@@ -141,6 +140,7 @@ def _choice(res):
     },
     allow_channels=False,
     allow_via_bot=False,
+    check_downpath=True,
 )
 async def op_(message: Message):
     replied = message.reply_to_message

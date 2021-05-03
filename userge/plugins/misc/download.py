@@ -27,7 +27,7 @@ LOGGER = userge.getLogger(__name__)
     check_downpath=True,
 )
 async def down_load_media(message: Message):
-    """ download from tg and url """
+    """download from tg and url"""
     if message.reply_to_message and message.reply_to_message.media:
         resource = message.reply_to_message
     elif message.input_str:
@@ -48,14 +48,14 @@ async def down_load_media(message: Message):
 async def handle_download(
     message: Message, resource: Union[Message, str]
 ) -> Tuple[str, int]:
-    """ download from resource """
+    """download from resource"""
     if isinstance(resource, Message):
         return await tg_download(message, resource)
     return await url_download(message, resource)
 
 
 async def url_download(message: Message, url: str) -> Tuple[str, int]:
-    """ download from link """
+    """download from link"""
     await message.edit("`Downloading From URL...`")
     start_t = datetime.now()
     custom_file_name = unquote_plus(os.path.basename(url))
@@ -72,7 +72,7 @@ async def url_download(message: Message, url: str) -> Tuple[str, int]:
         if message.process_is_canceled:
             downloader.stop()
             raise ProcessCanceled
-        total_length = downloader.filesize if downloader.filesize else 0
+        total_length = downloader.filesize or 0
         downloaded = downloader.get_dl_size()
         percentage = downloader.get_progress() * 100
         speed = downloader.get_speed(human=True)
@@ -119,7 +119,7 @@ async def url_download(message: Message, url: str) -> Tuple[str, int]:
 
 
 async def tg_download(message: Message, to_download: Message) -> Tuple[str, int]:
-    """ download from tg file """
+    """download from tg file"""
     await message.edit("`Downloading From TG...`")
     start_t = datetime.now()
     custom_file_name = Config.DOWN_PATH

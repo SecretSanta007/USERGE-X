@@ -1,14 +1,10 @@
-import json
 import os
-import random
 import re
 from math import ceil
 from typing import Any, Callable, Dict, List, Union
 
-import requests
-import youtube_dl as ytdl
+import ujson
 from html_telegraph_poster import TelegraphPoster
-from pymediainfo import MediaInfo
 from pyrogram import filters
 from pyrogram.errors import BadRequest, MessageIdInvalid, MessageNotModified
 from pyrogram.types import (
@@ -23,31 +19,40 @@ from pyrogram.types import (
     InlineQueryResultPhoto,
     InputTextMessageContent,
 )
+from youtubesearchpython import VideosSearch
 
-from userge import Config, Message, get_collection, get_version, userge, versions
+from userge import Config, Message, get_collection, userge
 from userge.core.ext import RawClient
-from userge.utils import get_file_id_and_ref
+from userge.utils import get_file_id, get_response
 from userge.utils import parse_buttons as pb
+from userge.utils import rand_key
 
-from .bot.alive import check_media_link
-from .bot.utube_inline import get_ytthumb, ytdl_btn_generator
-from .fun.stylish import font_gen
+from .bot.alive import Bot_Alive
+from .bot.gogo import Anime
+from .bot.utube_inline import (
+    download_button,
+    get_yt_video_id,
+    get_ytthumb,
+    result_formatter,
+    ytsearch_data,
+)
+from .fun.stylish import Styled, font_gen
 from .misc.redditdl import reddit_thumb_link
+from .utils.notes import get_inote
 
-INLINE_DB = {}
 CHANNEL = userge.getCLogger(__name__)
-MEDIA_TYPE, MEDIA_URL = None, None
-PATH = "userge/xcache"
+
 _CATEGORY = {
     "admin": "🙋🏻‍♂️",
     "fun": "🎨",
     "misc": "🧩",
     "tools": "🧰",
     "utils": "🗂",
-    "unofficial": "➕",
+    "xtra": "➕",
     "temp": "♻️",
     "plugins": "💎",
     "bot": "💠",
+    "custom": "🔧",
 }
 # Database
 SAVED_SETTINGS = get_collection("CONFIGS")
@@ -67,29 +72,13 @@ REPO_X = InlineQueryResultArticle(
                     "🚀 Deploy USERGE-X",
                     url=(
                         "https://heroku.com/deploy?template="
-                        "https://github.com/code-rgb/USERGE-X/tree/alpha"
+                        "https://github.com/code-pms/MyGpack"
                     ),
                 ),
             ]
         ]
     ),
 )
-# Thanks boi @FLAMEPOSEIDON
-ALIVE_IMGS = [
-    "https://telegra.ph/file/11123ef7dff2f1e19e79d.jpg",
-    "https://i.imgur.com/uzKdTXG.jpg",
-    "https://telegra.ph/file/6ecab390e4974c74c3764.png",
-    "https://telegra.ph/file/995c75983a6c0e4499b55.png",
-    "https://telegra.ph/file/86cc25c78ad667ca5e691.png",
-]
-
-
-def _get_mode() -> str:
-    if RawClient.DUAL_MODE:
-        return "↕️  **DUAL**"
-    if Config.BOT_TOKEN:
-        return "🤖  **BOT**"
-    return "👤  **USER**"
 
 
 async def _init() -> None:
@@ -101,9 +90,7 @@ async def _init() -> None:
 @userge.on_cmd(
     "help", about={"header": "Guide to use USERGE commands"}, allow_channels=False
 )
-async def helpme(
-    message: Message,
-) -> None:  # pylint: disable=missing-function-docstring
+async def helpme(message: Message) -> None:
     plugins = userge.manager.enabled_plugins
     if not message.input_str:
         out_str = (
@@ -163,7 +150,12 @@ if userge.has_bot:
 
     def check_owner(func):
         async def wrapper(_, c_q: CallbackQuery):
-            if c_q.from_user and c_q.from_user.id in Config.OWNER_ID:
+            if c_q.from_user and (
+                c_q.from_user.id
+                in Config.OWNER_ID
+                # or c_q.from_user.id in Config.SUDO_USERS
+            ):
+                await c_q.answer()
                 try:
                     await func(c_q)
                 except MessageNotModified:
@@ -280,9 +272,13 @@ if userge.has_bot:
     @userge.bot.on_callback_query(filters.regex(pattern=r"^chgclnt$"))
     @check_owner
     async def callback_chgclnt(callback_query: CallbackQuery):
+        if not RawClient.DUAL_MODE:
+            return await callback_query.answer(
+                "you using [BOT MODE], can't change client.", show_alert=True
+            )
         if Config.USE_USER_FOR_CLIENT_CHECKS:
             Config.USE_USER_FOR_CLIENT_CHECKS = False
-        else:
+        elif RawClient.DUAL_MODE:
             Config.USE_USER_FOR_CLIENT_CHECKS = True
         await SAVED_SETTINGS.update_one(
             {"_id": "CURRENT_CLIENT"},
@@ -361,9 +357,7 @@ if userge.has_bot:
                 )
             )
             if len(cur_pos.split("|")) > 2:
-                tmp_btns.append(
-                    InlineKeyboardButton("🖥 Main Menu", callback_data="mm".encode())
-                )
+                tmp_btns.append(InlineKeyboardButton("🖥 Main Menu", callback_data="mm"))
                 tmp_btns.append(
                     InlineKeyboardButton(
                         "🔄 Refresh", callback_data=f"refresh({cur_pos})".encode()
@@ -374,7 +368,7 @@ if userge.has_bot:
             tmp_btns.append(
                 InlineKeyboardButton(
                     f"🔩 Client for Checks and Sudos : {cur_clnt}",
-                    callback_data="chgclnt".encode(),
+                    callback_data="chgclnt",
                 )
             )
         return [tmp_btns]
@@ -392,7 +386,7 @@ if userge.has_bot:
     def plugin_data(cur_pos: str, p_num: int = 0):
         pos_list = cur_pos.split("|")
         plg = userge.manager.plugins[pos_list[2]]
-        text = f"""🔹 **--Plugin Status--** 🔹
+        text = f"""🔹 <u><b>Plugin Status<b></u> 🔹
 
 🎭 **Category** : `{pos_list[1]}`
 🔖 **Name** : `{plg.name}`
@@ -451,12 +445,12 @@ if userge.has_bot:
 ✅ **Loaded** : `{flt.is_loaded}`
 ➕ **Enabled** : `{flt.is_enabled}`"""
         if hasattr(flt, "about"):
-            text = f"""**--Command Status--**
+            text = f"""<b><u>Command Status</u></b>
 {flt_data}
 {flt.about}
 """
         else:
-            text = f"""⚖ **--Filter Status--** ⚖
+            text = f"""⚖ <b><u>Filter Status</u></b> ⚖
 {flt_data}
 """
         buttons = default_buttons(cur_pos)
@@ -488,30 +482,6 @@ if userge.has_bot:
         buttons = [tmp_btns] + buttons
         return text, buttons
 
-    async def get_alive_():
-        global MEDIA_TYPE, MEDIA_URL
-        type_, media_ = await check_media_link(Config.ALIVE_MEDIA)
-        if not media_:
-            return
-        MEDIA_TYPE = type_
-        if type(media_) is str:
-            limit = 1 if type_ == "url_gif" else 5
-            media_info = MediaInfo.parse(media_)
-            for track in media_info.tracks:
-                if track.track_type == "General":
-                    media_size = track.file_size / 1000000
-            if media_size < limit:
-                MEDIA_URL = media_
-        else:
-            try:
-                msg = await userge.bot.get_messages(media_[0], media_[1])
-                f_id, f_ref = get_file_id_and_ref(msg)
-                if msg.photo:
-                    MEDIA_TYPE = "tg_image"
-            except BadRequest:
-                return
-            MEDIA_URL = [f_id, f_ref]
-
     @userge.bot.on_inline_query()
     async def inline_answer(_, inline_query: InlineQuery):
         results = []
@@ -520,10 +490,11 @@ if userge.has_bot:
         str_x = i_q.split(" ", 2)  # trigger @username Text
         str_y = i_q.split(" ", 1)  # trigger and Text
         string_split = string.split()  # All lower and Split each word
-
+        iq_user_id = inline_query.from_user.id
         if (
-            inline_query.from_user.id in Config.OWNER_ID
-            or inline_query.from_user.id in Config.SUDO_USERS
+            (iq_user_id in Config.OWNER_ID)
+            or (iq_user_id in Config.SUDO_USERS)
+            and Config.SUDO_ENABLED
         ):
 
             if string == "syntax":
@@ -541,34 +512,6 @@ if userge.has_bot:
                         reply_markup=InlineKeyboardMarkup(owner),
                     )
                 )
-
-            if str_y[0] == "ytdl":
-                if len(str_y) == 2:
-                    link = str_y[1]
-                    x = ytdl.YoutubeDL({"no-playlist": True}).extract_info(
-                        link, download=False
-                    )
-                    formats = x.get("formats", [x])
-                    ytlink_code = x.get("id", None)
-                    # uploader = x.get('uploader', None)
-                    # channel_url = x.get('channel_url', None)
-                    vid_title = x.get("title", None)
-                    # upload_date = date_formatter(str(x.get('upload_date', None)))
-                    vid_thumb = get_ytthumb(ytlink_code)
-                    buttons = ytdl_btn_generator(formats, ytlink_code, inline_query.id)
-                    caption_text = f"**{vid_title}**"
-                    # caption_text += f"🔗 [Link]({link})  |  📅 : {upload_date}"
-                    # caption_text += f"📹 : [{uploader}]({channel_url})"
-
-                    results.append(
-                        InlineQueryResultPhoto(
-                            photo_url=vid_thumb,
-                            title=vid_title,
-                            description="⬇️ Click to Download",
-                            caption=caption_text,
-                            reply_markup=InlineKeyboardMarkup(buttons),
-                        )
-                    )
 
             if string == "age_verification_alert":
                 buttons = [
@@ -599,165 +542,159 @@ if userge.has_bot:
                         reddit_api += f"{subreddit_name}/30"
                     else:
                         return
-
                 else:
                     reddit_api += "30"
-
-                cn = requests.get(reddit_api)
-                r = cn.json()
-                if "code" in r:
-                    bool_is_gallery = False
-                    code = r["code"]
-                    code_message = r["message"]
+                try:
+                    r = await get_response.json(reddit_api)
+                except ValueError:
                     results.append(
                         InlineQueryResultArticle(
-                            title=str(code),
+                            title="Reddit Api is Down !",
                             input_message_content=InputTextMessageContent(
-                                f"**Error Code: {code}**\n`{code_message}`"
+                                "**Error Code: Status != 200**"
                             ),
-                            description="Enter A Valid Subreddit Name !",
                             thumb_url="https://i.imgur.com/7a7aPVa.png",
                         )
                     )
                 else:
-                    bool_is_gallery = True
-                    for post in r["memes"]:
-                        if "url" in post:
-                            postlink = post["postLink"]
-                            subreddit = post["subreddit"]
-                            title = post["title"]
-                            media_url = post["url"]
-                            author = post["author"]
-                            upvote = post["ups"]
-                            captionx = f"<b>{title}</b>\n"
-                            captionx += f"`Posted by u/{author}`\n"
-                            captionx += f"↕️ <code>{upvote}</code>\n"
-                            thumbnail = reddit_thumb_link(post["preview"])
-                            if post["spoiler"]:
-                                captionx += "⚠️ Post marked as SPOILER\n"
-                            if post["nsfw"]:
-                                captionx += "🔞 Post marked Adult \n"
-                            buttons = [
-                                [
-                                    InlineKeyboardButton(
-                                        f"Source: r/{subreddit}", url=postlink
-                                    )
+                    if "code" in r:
+                        bool_is_gallery = False
+                        code = r["code"]
+                        code_message = r["message"]
+                        results.append(
+                            InlineQueryResultArticle(
+                                title=str(code),
+                                input_message_content=InputTextMessageContent(
+                                    f"**Error Code: {code}**\n`{code_message}`"
+                                ),
+                                description="Enter A Valid Subreddit Name !",
+                                thumb_url="https://i.imgur.com/7a7aPVa.png",
+                            )
+                        )
+                    else:
+                        bool_is_gallery = True
+                        for post in r["memes"]:
+                            if "url" in post:
+                                postlink = post["postLink"]
+                                subreddit = post["subreddit"]
+                                title = post["title"]
+                                media_url = post["url"]
+                                author = post["author"]
+                                upvote = post["ups"]
+                                captionx = f"<b>{title}</b>\n"
+                                captionx += f"`Posted by u/{author}`\n"
+                                captionx += f"↕️ <code>{upvote}</code>\n"
+                                thumbnail = reddit_thumb_link(post["preview"])
+                                if post["spoiler"]:
+                                    captionx += "⚠️ Post marked as SPOILER\n"
+                                if post["nsfw"]:
+                                    captionx += "🔞 Post marked Adult \n"
+                                buttons = [
+                                    [
+                                        InlineKeyboardButton(
+                                            f"Source: r/{subreddit}", url=postlink
+                                        )
+                                    ]
                                 ]
-                            ]
-                            if media_url.endswith(".gif"):
+                                if media_url.endswith(".gif"):
+                                    results.append(
+                                        InlineQueryResultAnimation(
+                                            animation_url=media_url,
+                                            thumb_url=thumbnail,
+                                            caption=captionx,
+                                            reply_markup=InlineKeyboardMarkup(buttons),
+                                        )
+                                    )
+                                else:
+                                    results.append(
+                                        InlineQueryResultPhoto(
+                                            photo_url=media_url,
+                                            thumb_url=thumbnail,
+                                            caption=captionx,
+                                            reply_markup=InlineKeyboardMarkup(buttons),
+                                        )
+                                    )
+                    await inline_query.answer(
+                        results=results,
+                        cache_time=1,
+                        is_gallery=bool_is_gallery,
+                        switch_pm_text="Available Commands",
+                        switch_pm_parameter="inline",
+                    )
+                    return
+
+            if string == "alive":
+                alive_info = Bot_Alive.alive_info()
+                buttons = Bot_Alive.alive_buttons()
+                if not Config.ALIVE_MEDIA:
+                    results.append(
+                        InlineQueryResultPhoto(
+                            photo_url=Bot_Alive.alive_default_imgs(),
+                            caption=alive_info,
+                            reply_markup=buttons,
+                        )
+                    )
+                else:
+                    if Config.ALIVE_MEDIA.lower().strip() == "false":
+                        results.append(
+                            InlineQueryResultArticle(
+                                title="USERGE-X",
+                                input_message_content=InputTextMessageContent(
+                                    alive_info, disable_web_page_preview=True
+                                ),
+                                description="ALIVE",
+                                reply_markup=buttons,
+                            )
+                        )
+                    else:
+                        _media_type, _media_url = await Bot_Alive.check_media_link(
+                            Config.ALIVE_MEDIA
+                        )
+                        if _media_type == "url_gif":
+                            results.append(
+                                InlineQueryResultAnimation(
+                                    animation_url=_media_url,
+                                    caption=alive_info,
+                                    reply_markup=buttons,
+                                )
+                            )
+                        elif _media_type == "url_image":
+                            results.append(
+                                InlineQueryResultPhoto(
+                                    photo_url=_media_url,
+                                    caption=alive_info,
+                                    reply_markup=buttons,
+                                )
+                            )
+                        elif _media_type == "tg_media":
+                            c_file_id = Bot_Alive.get_bot_cached_fid()
+                            if c_file_id is None:
+                                try:
+                                    c_file_id = get_file_id(
+                                        await userge.bot.get_messages(
+                                            _media_url[0], _media_url[1]
+                                        )
+                                    )
+                                except Exception as b_rr:
+                                    await CHANNEL.log(str(b_rr))
+                            if Bot_Alive.is_photo(c_file_id):
                                 results.append(
-                                    InlineQueryResultAnimation(
-                                        animation_url=media_url,
-                                        thumb_url=thumbnail,
-                                        caption=captionx,
-                                        reply_markup=InlineKeyboardMarkup(buttons),
+                                    InlineQueryResultCachedPhoto(
+                                        file_id=c_file_id,
+                                        caption=alive_info,
+                                        reply_markup=buttons,
                                     )
                                 )
                             else:
                                 results.append(
-                                    InlineQueryResultPhoto(
-                                        photo_url=media_url,
-                                        thumb_url=thumbnail,
-                                        caption=captionx,
-                                        reply_markup=InlineKeyboardMarkup(buttons),
+                                    InlineQueryResultCachedDocument(
+                                        title="USERGE-X",
+                                        file_id=c_file_id,
+                                        caption=alive_info,
+                                        description="ALIVE",
+                                        reply_markup=buttons,
                                     )
                                 )
-                await inline_query.answer(
-                    results=results,
-                    cache_time=1,
-                    is_gallery=bool_is_gallery,
-                    switch_pm_text="Available Commands",
-                    switch_pm_parameter="inline",
-                )
-                return
-
-            if string == "rick":
-                rick = [
-                    [
-                        InlineKeyboardButton(
-                            text="🔍", url="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-                        )
-                    ]
-                ]
-                results.append(
-                    InlineQueryResultArticle(
-                        title="Not a Rick Roll",
-                        input_message_content=InputTextMessageContent("Search Results"),
-                        description="Definately Not a Rick Roll",
-                        thumb_url="https://i.imgur.com/hRCaKAy.png",
-                        reply_markup=InlineKeyboardMarkup(rick),
-                    )
-                )
-
-            if string == "alive":
-                buttons = [
-                    [
-                        InlineKeyboardButton(
-                            "🔧 SETTINGS", callback_data="settings_btn"
-                        ),
-                        InlineKeyboardButton(text="⚡️ REPO", url=Config.UPSTREAM_REPO),
-                    ]
-                ]
-
-                alive_info = f"""
-    **[USERGE-X](https://telegram.dog/x_xtests) is Up and Running**
-
- • 🐍 Python :  `v{versions.__python_version__}`
- • 🔥 Pyrogram :  `v{versions.__pyro_version__}`
- • 🧬 𝑿 :  `v{get_version()}`
-
-{_get_mode()}  |  🕔: {userge.uptime}
-"""
-
-                if not MEDIA_URL and Config.ALIVE_MEDIA:
-                    await get_alive_()
-
-                if MEDIA_URL:
-                    if MEDIA_TYPE == "url_gif":
-                        results.append(
-                            InlineQueryResultAnimation(
-                                animation_url=MEDIA_URL,
-                                caption=alive_info,
-                                reply_markup=InlineKeyboardMarkup(buttons),
-                            )
-                        )
-                    elif MEDIA_TYPE == "url_image":
-                        results.append(
-                            InlineQueryResultPhoto(
-                                photo_url=MEDIA_URL,
-                                caption=alive_info,
-                                reply_markup=InlineKeyboardMarkup(buttons),
-                            )
-                        )
-                    elif MEDIA_TYPE == "tg_image":
-                        results.append(
-                            InlineQueryResultCachedPhoto(
-                                file_id=MEDIA_URL[0],
-                                file_ref=MEDIA_URL[1],
-                                caption=alive_info,
-                                reply_markup=InlineKeyboardMarkup(buttons),
-                            )
-                        )
-                    else:
-                        results.append(
-                            InlineQueryResultCachedDocument(
-                                title="USERGE-X",
-                                file_id=MEDIA_URL[0],
-                                file_ref=MEDIA_URL[1],
-                                caption=alive_info,
-                                description="ALIVE",
-                                reply_markup=InlineKeyboardMarkup(buttons),
-                            )
-                        )
-                else:  # default
-                    random_alive = random.choice(ALIVE_IMGS)
-                    results.append(
-                        InlineQueryResultPhoto(
-                            photo_url=random_alive,
-                            caption=alive_info,
-                            reply_markup=InlineKeyboardMarkup(buttons),
-                        )
-                    )
 
             if string == "geass":
                 results.append(
@@ -766,6 +703,44 @@ if userge.has_bot:
                         caption="To defeat evil, I must become a greater evil",
                     )
                 )
+
+            if str_y[0] == "inotes" and len(str_y) == 2:
+                note_data = str_y[1].split("_", 2)
+                note_data = [int(x) for x in note_data]
+                if len(note_data) == 3:
+                    cnote = await get_inote(
+                        note_id=note_data[0], chat_id=note_data[1], user_id=note_data[2]
+                    )
+                    type_ = cnote.get("type")
+                    if type_ == "image":
+                        results.append(
+                            InlineQueryResultCachedPhoto(
+                                file_id=cnote.get("file_id"),
+                                caption=cnote.get("caption"),
+                                reply_markup=cnote.get("buttons"),
+                            )
+                        )
+                    elif type_ == "media":
+                        results.append(
+                            InlineQueryResultCachedDocument(
+                                title="Inline Note",
+                                file_id=cnote.get("file_id"),
+                                caption=cnote.get("caption"),
+                                description=f"#{note_data[0]}",
+                                reply_markup=cnote.get("buttons"),
+                            )
+                        )
+                    else:
+                        results.append(
+                            InlineQueryResultArticle(
+                                title="Inline Note",
+                                input_message_content=InputTextMessageContent(
+                                    cnote.get("caption"), disable_web_page_preview=True
+                                ),
+                                description=f"#{note_data[0]}",
+                                reply_markup=cnote.get("buttons"),
+                            )
+                        )
 
             if string == "gapps":
                 buttons = [
@@ -789,62 +764,92 @@ if userge.has_bot:
                     )
                 )
 
-            if len(string_split) == 2:  # workaround for list index out of range
-                if string_split[0] == "ofox":
-                    codename = string_split[1]
-                    t = TelegraphPoster(use_api=True)
-                    t.create_api_token("Userge-X")
-                    photo = "https://i.imgur.com/582uaSk.png"
-                    api_host = "https://api.orangefox.download/v2/device/"
-                    try:
-                        cn = requests.get(f"{api_host}{codename}")
-                        r = cn.json()
-                    except ValueError:
-                        return
-                    s = requests.get(
-                        f"{api_host}{codename}/releases/stable/last"
-                    ).json()
-                    info = f"📱 **Device**: {r['fullname']}\n"
-                    info += f"👤 **Maintainer**: {r['maintainer']['name']}\n\n"
-                    recovery = f"🦊 <code>{s['file_name']}</code>\n"
-                    recovery += f"📅 {s['date']}\n"
-                    recovery += f"ℹ️ **Version:** {s['version']}\n"
-                    recovery += f"📌 **Build Type:** {s['build_type']}\n"
-                    recovery += f"🔰 **Size:** {s['size_human']}\n\n"
-                    recovery += "📍 **Changelog:**\n"
-                    recovery += f"<code>{s['changelog']}</code>\n\n"
-                    msg = info
-                    msg += recovery
-                    notes_ = s.get("notes")
-                    if notes_:
-                        notes = t.post(title="READ Notes", author="", text=notes_)
-                        buttons = [
-                            [
-                                InlineKeyboardButton("🗒️ NOTES", url=notes["url"]),
-                                InlineKeyboardButton("⬇️ DOWNLOAD", url=s["url"]),
-                            ]
-                        ]
-                    else:
-                        buttons = [
-                            [InlineKeyboardButton(text="⬇️ DOWNLOAD", url=s["url"])]
-                        ]
-
-                    results.append(
-                        InlineQueryResultPhoto(
-                            photo_url=photo,
-                            thumb_url="https://i.imgur.com/o0onLYB.jpg",
-                            title="Latest OFOX RECOVERY",
-                            description=f"For device : {codename}",
-                            caption=msg,
-                            reply_markup=InlineKeyboardMarkup(buttons),
+            if len(string_split) == 2 and (string_split[0] == "ofox"):
+                codename = string_split[1]
+                t = TelegraphPoster(use_api=True)
+                t.create_api_token("Userge-X")
+                photo = "https://i.imgur.com/582uaSk.png"
+                api_host = "https://api.orangefox.download/v2/device/"
+                try:
+                    async with get_response.get_session() as session:
+                        r = await get_response.json(
+                            f"{api_host}{codename}", session=session
                         )
+                        s = await get_response.json(
+                            f"{api_host}{codename}/releases/stable/last",
+                            session=session,
+                        )
+                except ValueError:
+                    return
+                info = f"📱 **Device**: {r['fullname']}\n"
+                info += f"👤 **Maintainer**: {r['maintainer']['name']}\n\n"
+                recovery = f"🦊 <code>{s['file_name']}</code>\n"
+                recovery += f"📅 {s['date']}\n"
+                recovery += f"ℹ️ **Version:** {s['version']}\n"
+                recovery += f"📌 **Build Type:** {s['build_type']}\n"
+                recovery += f"🔰 **Size:** {s['size_human']}\n\n"
+                recovery += "📍 **Changelog:**\n"
+                recovery += f"<code>{s['changelog']}</code>\n\n"
+                msg = info
+                msg += recovery
+                notes_ = s.get("notes")
+                if notes_:
+                    notes = t.post(title="READ Notes", author="", text=notes_)
+                    buttons = [
+                        [
+                            InlineKeyboardButton("🗒️ NOTES", url=notes["url"]),
+                            InlineKeyboardButton("⬇️ DOWNLOAD", url=s["url"]),
+                        ]
+                    ]
+                else:
+                    buttons = [[InlineKeyboardButton(text="⬇️ DOWNLOAD", url=s["url"])]]
+                results.append(
+                    InlineQueryResultPhoto(
+                        photo_url=photo,
+                        thumb_url="https://i.imgur.com/o0onLYB.jpg",
+                        title="Latest OFOX RECOVERY",
+                        description=f"For device : {codename}",
+                        caption=msg,
+                        reply_markup=InlineKeyboardMarkup(buttons),
                     )
+                )
 
             if string == "repo":
                 results.append(REPO_X)
 
+            if len(str_y) == 2 and str_y[0] == "anime":
+                for i in await Anime.search(str_y[1]):
+                    results.append(
+                        InlineQueryResultArticle(
+                            title=i.get("title"),
+                            input_message_content=InputTextMessageContent(
+                                f'[\u200c]({i.get("image")})**{i.get("title")}**\n{i.get("release")}'
+                            ),
+                            description=i.get("release"),
+                            thumb_url=i.get("image"),
+                            reply_markup=InlineKeyboardMarkup(
+                                [
+                                    [
+                                        InlineKeyboardButton(
+                                            text="⬇️  Download",
+                                            callback_data=f'get_eps{i.get("key")}',
+                                        )
+                                    ]
+                                ]
+                            ),
+                        )
+                    )
+                if len(results) != 0:
+                    await inline_query.answer(
+                        results=results[:50],
+                        cache_time=1,
+                        switch_pm_text="Available Commands",
+                        switch_pm_parameter="inline",
+                    )
+                    return
+
             if str_y[0] == "spoiler":
-                if not os.path.exists("./userge/xcache/spoiler_db.json"):
+                if not os.path.exists(f"{Config.CACHE_PATH}/spoiler_db.json"):
                     results.append(
                         InlineQueryResultArticle(
                             title="No Spoiler Found",
@@ -873,11 +878,11 @@ if userge.has_bot:
                             )
                         )
                     else:
-                        view_db = json.load(open("./userge/xcache/spoiler_db.json"))
+                        fo = open(f"{Config.CACHE_PATH}/spoiler_db.json")
+                        view_db = ujson.load(fo)
+                        fo.close()
                         if len(view_db) != 0:
-                            numm = 0
-                            for spoilerr in view_db:
-                                numm += 1
+                            for numm, spoilerr in enumerate(view_db, start=1):
                                 buttons = [
                                     [
                                         InlineKeyboardButton(
@@ -904,22 +909,17 @@ if userge.has_bot:
 
             if str_x[0].lower() == "op" and len(str_x) > 1:
                 txt = i_q[3:]
-
-                opinion = os.path.join(PATH, "emoji_data.txt")
-                try:
-                    view_data = json.load(open(opinion))
-                except:
-                    view_data = False
-
-                if view_data:
+                opinion = os.path.join(Config.CACHE_PATH, "emoji_data.txt")
+                if os.path.exists(opinion):
+                    with open(opinion) as fo:
+                        view_data = ujson.load(fo)
                     # Uniquely identifies an inline message
                     new_id = {int(inline_query.id): [{}]}
                     view_data.update(new_id)
-                    json.dump(view_data, open(opinion, "w"))
                 else:
-                    d = {int(inline_query.id): [{}]}
-                    json.dump(d, open(opinion, "w"))
-
+                    view_data = {int(inline_query.id): [{}]}
+                with open(opinion, "w") as outfile:
+                    ujson.dump(view_data, outfile)
                 buttons = [
                     [
                         InlineKeyboardButton(
@@ -941,34 +941,28 @@ if userge.has_bot:
                 )
 
             if "btn_" in str_y[0] or str_y[0] == "btn":
-
-                inline_db_path = "./userge/xcache/inline_db.json"
+                inline_db_path = f"{Config.CACHE_PATH}/inline_db.json"
                 if os.path.exists(inline_db_path):
                     with open(inline_db_path, "r") as data_file:
-                        view_db = json.load(data_file)
-
+                        view_db = ujson.load(data_file)
                     data_count_n = 1
                     reverse_list = list(view_db)
                     reverse_list.reverse()
                     for butt_ons in reverse_list:
-                        if data_count_n > 15:
+                        if data_count_n > 30:
                             view_db.pop(butt_ons, None)
                         data_count_n += 1
-
                     with open(inline_db_path, "w") as data_file:
-                        json.dump(view_db, data_file)
-
+                        ujson.dump(view_db, data_file)
                     if str_y[0] == "btn":
                         inline_storage = list(view_db)
                     else:
                         rnd_id = (str_y[0].split("_", 1))[1]
                         inline_storage = [rnd_id]
-
                     if len(inline_storage) == 0:
                         return
-
                     for inline_content in inline_storage:
-                        inline_db = view_db.get(inline_content, None)
+                        inline_db = view_db.get(inline_content)
                         if inline_db:
                             if (
                                 inline_db["media_valid"]
@@ -977,16 +971,13 @@ if userge.has_bot:
                                 saved_msg = await userge.bot.get_messages(
                                     Config.LOG_CHANNEL_ID, int(inline_db["media_id"])
                                 )
-                                media_data = get_file_id_and_ref(saved_msg)
-
+                                media_data = get_file_id(saved_msg)
                             textx, buttonsx = pb(inline_db["msg_content"])
-
                             if inline_db["media_valid"]:
                                 if saved_msg.photo:
                                     results.append(
                                         InlineQueryResultCachedPhoto(
-                                            file_id=media_data[0],
-                                            file_ref=media_data[1],
+                                            file_id=media_data,
                                             caption=textx,
                                             reply_markup=buttonsx,
                                         )
@@ -995,8 +986,7 @@ if userge.has_bot:
                                     results.append(
                                         InlineQueryResultCachedDocument(
                                             title=textx,
-                                            file_id=media_data[0],
-                                            file_ref=media_data[1],
+                                            file_id=media_data,
                                             caption=textx,
                                             description="Inline Button",
                                             reply_markup=buttonsx,
@@ -1013,97 +1003,140 @@ if userge.has_bot:
                                     )
                                 )
 
-            if str_y[0].lower() == "stylish":
-                if len(str_y) == 2:
-                    results = []
-                    input_text = str_y[1]
-                    font_names = [
-                        "serif",
-                        "sans",
-                        "sans_i",
-                        "serif_i",
-                        "medi_b",
-                        "medi",
-                        "double",
-                        "cursive_b",
-                        "cursive",
-                        "bigsmall",
-                        "reverse",
-                        "circle",
-                        "circle_b",
-                        "mono",
-                        "square_b",
-                        "square",
-                        "smoth",
-                        "goth",
-                        "wide",
-                        "web",
-                        "weeb",
-                        "weeeb",
-                    ]
-                    for f_name in font_names:
-                        styled_str = await font_gen(f_name, input_text)
-                        results.append(
-                            InlineQueryResultArticle(
-                                title=f_name.upper(),
-                                input_message_content=InputTextMessageContent(
-                                    styled_str
-                                ),
-                                description=styled_str,
-                            )
-                        )
-                    await inline_query.answer(
-                        results=results,
-                        cache_time=1,
-                        switch_pm_text="Available Commands",
-                        switch_pm_parameter="inline",
-                    )
-                    return
-
-            if str_x[0].lower() == "secret":
-                if len(str_x) == 3:
-                    user_name = str_x[1]
-                    msg = str_x[2]
-                    try:
-                        a = await userge.get_users(user_name)
-                        user_id = a.id
-                    except:
-                        return
-                    secret = os.path.join(PATH, "secret.txt")
-                    try:
-                        view_data = json.load(open(secret))
-                    except:
-                        view_data = False
-
-                    if view_data:
-                        # Uniquely identifies an inline message
-                        new_id = {
-                            str(inline_query.id): {"user_id": user_id, "msg": msg}
-                        }
-                        view_data.update(new_id)
-                        json.dump(view_data, open(secret, "w"))
-                    else:
-                        d = {str(inline_query.id): {"user_id": user_id, "msg": msg}}
-                        json.dump(d, open(secret, "w"))
-
-                    buttons = [
-                        [
-                            InlineKeyboardButton(
-                                "🔐  SHOW", callback_data=f"secret_{inline_query.id}"
-                            )
-                        ]
-                    ]
+            if str_y[0].lower() == "stylish" and len(str_y) == 2:
+                results = []
+                for f_name in Styled.font_choice:
+                    styled_str = font_gen(f_name, str_y[1])
                     results.append(
                         InlineQueryResultArticle(
-                            title="Send A Secret Message",
+                            title=f_name.upper(),
                             input_message_content=InputTextMessageContent(
-                                f"📩 <b>Secret Msg</b> for {user_name}. Only he/she can open it."
+                                f"`{styled_str}`"
                             ),
-                            description=f"Send Secret Message to: {user_name}",
-                            thumb_url="https://i.imgur.com/c5pZebC.png",
-                            reply_markup=InlineKeyboardMarkup(buttons),
+                            description=styled_str,
                         )
                     )
+                await inline_query.answer(
+                    results=results,
+                    cache_time=1,
+                    switch_pm_text="Available Commands",
+                    switch_pm_parameter="inline",
+                )
+                return
+
+            if str_x[0].lower() in ["secret", "troll"] and len(str_x) == 3:
+                user_name = str_x[1]
+                msg = str_x[2]
+                try:
+                    receiver = await userge.get_users(user_name)
+                except (BadRequest, IndexError):
+                    return
+                secret = os.path.join(Config.CACHE_PATH, "secret.json")
+                key_ = rand_key()
+                r_name = (
+                    ("@" + receiver.username)
+                    if receiver.username
+                    else f"{receiver.first_name} {receiver.last_name or ''}"
+                )
+                secret_data = {
+                    key_: {
+                        "sender": iq_user_id,
+                        "receiver": {"id": receiver.id, "name": r_name},
+                        "msg": msg,
+                        "views": [],
+                    }
+                }
+                if os.path.exists(secret):
+                    with open(secret) as outfile:
+                        view_data = ujson.load(outfile)
+                    view_data.update(secret_data)
+                else:
+                    view_data = secret_data
+                # Save
+                with open(secret, "w") as r:
+                    ujson.dump(view_data, r, indent=4)
+                if str_x[0].lower() == "secret":
+                    c_data = f"secret_{key_}"
+                    i_m_content = f"📩 <b>Secret Msg</b> for <b>{r_name}</b>. Only he/she can open it."
+                    i_l_des = f"Send Secret Message to: {r_name}"
+                    title = "Send A Secret Message"
+                    thumb_img = "https://i.imgur.com/c5pZebC.png"
+                else:
+                    c_data = f"troll_{key_}"
+                    i_m_content = f"😈 Only <b>{r_name}</b> can't view this message. UwU"
+                    i_l_des = f"Message Hidden from {r_name}"
+                    title = "😈 Troll"
+                    thumb_img = "https://i.imgur.com/0vg5B0A.png"
+                buttons = [[InlineKeyboardButton("🔐  SHOW", callback_data=c_data)]]
+                results.append(
+                    InlineQueryResultArticle(
+                        title=title,
+                        input_message_content=InputTextMessageContent(i_m_content),
+                        description=i_l_des,
+                        thumb_url=thumb_img,
+                        reply_markup=InlineKeyboardMarkup(buttons),
+                    )
+                )
+
+            if str_y[0].lower() == "ytdl" and len(str_y) == 2:
+                link = get_yt_video_id(str_y[1].strip())
+                found_ = True
+                if link is None:
+                    search = VideosSearch(str_y[1].strip(), limit=15)
+                    resp = (search.result()).get("result")
+                    if len(resp) == 0:
+                        found_ = False
+                    else:
+                        outdata = await result_formatter(resp)
+                        key_ = rand_key()
+                        ytsearch_data.store_(key_, outdata)
+                        buttons = InlineKeyboardMarkup(
+                            [
+                                [
+                                    InlineKeyboardButton(
+                                        text=f"1 / {len(outdata)}",
+                                        callback_data=f"ytdl_next_{key_}_1",
+                                    )
+                                ],
+                                [
+                                    InlineKeyboardButton(
+                                        text="📜  List all",
+                                        callback_data=f"ytdl_listall_{key_}_1",
+                                    ),
+                                    InlineKeyboardButton(
+                                        text="⬇️  Download",
+                                        callback_data=f'ytdl_download_{outdata[1]["video_id"]}_0',
+                                    ),
+                                ],
+                            ]
+                        )
+                        caption = outdata[1]["message"]
+                        photo = outdata[1]["thumb"]
+                else:
+                    caption, buttons = await download_button(link, body=True)
+                    photo = await get_ytthumb(link)
+
+                if found_:
+                    results.append(
+                        InlineQueryResultPhoto(
+                            photo_url=photo,
+                            title=link,
+                            description="⬇️ Click to Download",
+                            caption=caption,
+                            reply_markup=buttons,
+                        )
+                    )
+                else:
+                    results.append(
+                        InlineQueryResultArticle(
+                            title="not Found",
+                            input_message_content=InputTextMessageContent(
+                                f"No Results found for `{str_y[1]}`"
+                            ),
+                            description="INVALID",
+                        )
+                    )
+
             MAIN_MENU = InlineQueryResultArticle(
                 title="Main Menu",
                 input_message_content=InputTextMessageContent(" 𝐔𝐒𝐄𝐑𝐆𝐄-𝐗  𝗠𝗔𝗜𝗡 𝗠𝗘𝗡𝗨 "),

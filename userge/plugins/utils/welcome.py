@@ -1,12 +1,9 @@
 """ auto welcome and left messages """
 
-# Copyright (C) 2020 by UsergeTeam@Github, < https://github.com/UsergeTeam >.
-#
-# This file is part of < https://github.com/UsergeTeam/Userge > project,
-# and is released under the "GNU v3.0 License Agreement".
-# Please see < https://github.com/uaudith/Userge/blob/master/LICENSE >
-#
-# All rights reserved.
+
+import asyncio
+
+from pyrogram.errors import FloodWait
 
 from userge import Config, Message, filters, get_collection, userge
 
@@ -40,6 +37,7 @@ async def _init() -> None:
             "{chat}": "chat name",
             "{count}": "chat members count",
             "{mention}": "mention user",
+            r"%%%": 'This separator can be used to add "random" welcome',
         },
         "types": [
             "audio",
@@ -64,7 +62,7 @@ async def _init() -> None:
     allow_private=False,
 )
 async def setwel(msg: Message):
-    """ set welcome message """
+    """set welcome message"""
     await raw_set(msg, "Welcome", WELCOME_COLLECTION, WELCOME_CHATS)
 
 
@@ -92,8 +90,7 @@ async def setwel(msg: Message):
             "video",
         ],
         "examples": [
-            "{tr}setleft {flname}, Why you left :(\n",
-            "or reply to supported media",
+            "{tr}setleft {flname}, Why you left :(\nor reply to supported media",
             "reply {tr}setleft to text message or supported media with text",
         ],
         "buttons": "<code>[name][buttonurl:link]</code> - <b>add a url button</b>\n"
@@ -104,7 +101,7 @@ async def setwel(msg: Message):
     allow_private=False,
 )
 async def setleft(msg: Message):
-    """ set left message """
+    """set left message"""
     await raw_set(msg, "Left", LEFT_COLLECTION, LEFT_CHATS)
 
 
@@ -119,7 +116,7 @@ async def setleft(msg: Message):
     allow_private=False,
 )
 async def nowel(msg: Message):
-    """ disable welcome message """
+    """disable welcome message"""
     await raw_no(msg, "Welcome", WELCOME_COLLECTION, WELCOME_CHATS)
 
 
@@ -134,7 +131,7 @@ async def nowel(msg: Message):
     allow_private=False,
 )
 async def noleft(msg: Message):
-    """ disable left message """
+    """disable left message"""
     await raw_no(msg, "Left", LEFT_COLLECTION, LEFT_CHATS)
 
 
@@ -149,7 +146,7 @@ async def noleft(msg: Message):
     allow_private=False,
 )
 async def dowel(msg: Message):
-    """ enable welcome message """
+    """enable welcome message"""
     await raw_do(msg, "Welcome", WELCOME_COLLECTION, WELCOME_CHATS)
 
 
@@ -164,7 +161,7 @@ async def dowel(msg: Message):
     allow_private=False,
 )
 async def doleft(msg: Message):
-    """ enable left message """
+    """enable left message"""
     await raw_do(msg, "Left", LEFT_COLLECTION, LEFT_CHATS)
 
 
@@ -179,7 +176,7 @@ async def doleft(msg: Message):
     allow_private=False,
 )
 async def delwel(msg: Message):
-    """ delete welcome message """
+    """delete welcome message"""
     await raw_del(msg, "Welcome", WELCOME_COLLECTION, WELCOME_CHATS)
 
 
@@ -194,7 +191,7 @@ async def delwel(msg: Message):
     allow_private=False,
 )
 async def delleft(msg: Message):
-    """ delete left messaage """
+    """delete left messaage"""
     await raw_del(msg, "Left", LEFT_COLLECTION, LEFT_CHATS)
 
 
@@ -209,7 +206,7 @@ async def delleft(msg: Message):
     allow_private=False,
 )
 async def viewwel(msg: Message):
-    """ view welcome message """
+    """view welcome message"""
     await raw_view(msg, "Welcome", WELCOME_COLLECTION)
 
 
@@ -224,20 +221,26 @@ async def viewwel(msg: Message):
     allow_private=False,
 )
 async def viewleft(msg: Message):
-    """ view left message """
+    """view left message"""
     await raw_view(msg, "Left", LEFT_COLLECTION)
 
 
 @userge.on_new_member(WELCOME_CHATS)
 async def saywel(msg: Message):
-    """ welcome message handler """
-    await raw_say(msg, "Welcome", WELCOME_COLLECTION)
+    """welcome message handler"""
+    try:
+        await raw_say(msg, "Welcome", WELCOME_COLLECTION)
+    except FloodWait as e:
+        await asyncio.sleep(e.x + 5)
 
 
 @userge.on_left_member(LEFT_CHATS)
 async def sayleft(msg: Message):
-    """ left message handler """
-    await raw_say(msg, "Left", LEFT_COLLECTION)
+    """left message handler"""
+    try:
+        await raw_say(msg, "Left", LEFT_COLLECTION)
+    except FloodWait as e:
+        await asyncio.sleep(e.x + 5)
 
 
 async def raw_set(message: Message, name, collection, chats):
